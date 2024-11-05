@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Blog Post Generator</title>
+    <style>
+        .input-container {
+            margin: 10px 0;
+        }
+        button {
+            margin-top: 20px;
+        }
+        .required::after {
+            content: " *";
+            color: red;
+        }
+        textarea {
+            width: 100%;
+            min-height: 200px;
+            margin: 10px 0;
+            padding: 10px;
+        }
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .loading-spinner {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .status-message {
+            color: white;
+            text-align: center;
+            margin-top: 20px;
+        }
+        .error {
+            color: #ff4444;
+        }
+        .success {
+            color: #00C851;
+        }
+    </style>
+</head>
+<body>
+    <h1>Blog Post Generator</h1>
+    <form id="topicForm">
+        <div class="input-container">
+            <label for="topics" class="required">Topics (one per line):</label>
+            <textarea id="topics" name="topics" required></textarea>
+        </div>
+        <button type="submit">Generate Posts</button>
+    </form>
+
+    <div class="loading-overlay" id="loadingOverlay">
+        <div>
+            <div class="loading-spinner"></div>
+            <div class="status-message" id="statusMessage">Generating posts...</div>
+        </div>
+    </div>
+
+    <div id="results"></div>
+
+    <script>
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const statusMessage = document.getElementById('statusMessage');
+        const resultsDiv = document.getElementById('results');
+
+        document.getElementById('topicForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const textarea = document.getElementById('topics');
+            const topics = textarea.value.split('\n').filter(topic => topic.trim());
+            
+            if (topics.length === 0) {
+                alert('Please enter at least one topic');
+                return;
+            }
+
+            // Show loading overlay
+            loadingOverlay.style.display = 'flex';
+            resultsDiv.innerHTML = '';
+            let completedPosts = 0;
+            
+            for(const topic of topics) {
+                const value = topic.trim();
+                if(value) {
+                    try {
+                        statusMessage.textContent = `Generating post ${completedPosts + 1} of ${topics.length}: ${value}`;
+                        
+                        const response = await fetch('/generate-post', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ topic: value })
+                        });
+                        const data = await response.json();
+                        
+                        completedPosts++;
+                        const status = document.createElement('div');
+                        status.className = data.success ? 'success' : 'error';
+                        status.textContent = data.success ? 
+                            `✓ Successfully created post: ${value}` :
+                            `✗ Failed to create post: ${value} - ${data.error}`;
+                        resultsDiv.appendChild(status);
+                        
+                    } catch (error) {
+                        const status = document.createElement('div');
+                        status.className = 'error';
+                        status.textContent = `✗ Error creating post: ${value} - ${error.message}`;
+                        resultsDiv.appendChild(status);
+                    }
+                }
+            }
+            
+            // Hide loading overlay
+            loadingOverlay.style.display = 'none';
+            statusMessage.textContent = 'Generating posts...';
+        });
+    </script>
+</body>
+</html> 
