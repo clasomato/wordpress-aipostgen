@@ -6,6 +6,28 @@
         .input-container {
             margin: 10px 0;
         }
+        .topics-container {
+            display: flex;
+            gap: 20px;
+        }
+        .topics-list {
+            flex: 1;
+        }
+        .file-inputs {
+            flex: 1;
+            margin-top: 43px;
+        }
+        .file-input-container {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .file-input-container label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
         button {
             margin-top: 20px;
         }
@@ -59,9 +81,16 @@
 <body>
     <h1>Blog Post Generator</h1>
     <form id="topicForm">
-        <div class="input-container">
-            <label for="topics" class="required">Topics (one per line):</label>
-            <textarea id="topics" name="topics" required></textarea>
+        <div class="topics-container">
+            <div class="topics-list">
+                <div class="input-container">
+                    <label for="topics" class="required">Topics (one per line):</label>
+                    <textarea id="topics" name="topics" required></textarea>
+                </div>
+            </div>
+            <div class="file-inputs" id="fileInputs">
+                <!-- File inputs will be added here dynamically -->
+            </div>
         </div>
         <button type="submit">Generate Posts</button>
     </form>
@@ -79,10 +108,39 @@
         const loadingOverlay = document.getElementById('loadingOverlay');
         const statusMessage = document.getElementById('statusMessage');
         const resultsDiv = document.getElementById('results');
+        const textarea = document.getElementById('topics');
+        const fileInputsContainer = document.getElementById('fileInputs');
 
+        // Update file inputs when textarea changes
+        textarea.addEventListener('input', () => {
+            const topics = textarea.value.split('\n').filter(topic => topic.trim());
+            fileInputsContainer.innerHTML = '';
+            
+            topics.forEach((topic, index) => {
+                if (topic.trim()) {
+                    const container = document.createElement('div');
+                    container.className = 'file-input-container';
+                    
+                    const label = document.createElement('label');
+                    label.htmlFor = `image${index}`;
+                    label.textContent = topic.trim();
+                    
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.id = `image${index}`;
+                    input.name = `image${index}`;
+                    input.accept = 'image/*';
+                    
+                    container.appendChild(label);
+                    container.appendChild(input);
+                    fileInputsContainer.appendChild(container);
+                }
+            });
+        });
+
+        // Modify form submission to include file uploads
         document.getElementById('topicForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const textarea = document.getElementById('topics');
             const topics = textarea.value.split('\n').filter(topic => topic.trim());
             
             if (topics.length === 0) {
@@ -90,23 +148,27 @@
                 return;
             }
 
-            // Show loading overlay
             loadingOverlay.style.display = 'flex';
             resultsDiv.innerHTML = '';
             let completedPosts = 0;
             
-            for(const topic of topics) {
-                const value = topic.trim();
+            for(let i = 0; i < topics.length; i++) {
+                const value = topics[i].trim();
                 if(value) {
                     try {
                         statusMessage.textContent = `Generating post ${completedPosts + 1} of ${topics.length}: ${value}`;
                         
+                        const formData = new FormData();
+                        formData.append('topic', value);
+                        
+                        const fileInput = document.getElementById(`image${i}`);
+                        if (fileInput.files.length > 0) {
+                            formData.append('image', fileInput.files[0]);
+                        }
+                        
                         const response = await fetch('/generate-post', {
                             method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({ topic: value })
+                            body: formData
                         });
                         const data = await response.json();
                         
@@ -127,7 +189,6 @@
                 }
             }
             
-            // Hide loading overlay
             loadingOverlay.style.display = 'none';
             statusMessage.textContent = 'Generating posts...';
         });
