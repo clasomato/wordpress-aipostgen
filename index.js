@@ -15,6 +15,9 @@ const WP_API_URL = process.env.WP_API_URL;
 const WP_USERNAME = process.env.WP_USERNAME;
 const WP_APP_PASSWORD = process.env.WP_APP_PASSWORD;
 
+// Unsplash API credentials
+const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY;
+
 // Function to generate content using Ollama
 async function generateWithOllama(prompt) {
     try {
@@ -146,39 +149,39 @@ async function compressImage(buffer) {
 // Helper function to set featured image from Unsplash
 async function setFeaturedImage(imagePrompt) {
     try {
-        // Simplify the image prompt to basic keywords
-        const keywords = imagePrompt.split(' ').slice(0, 3).join(',');
-        const imageUrl = `https://source.unsplash.com/featured/1600x900/?${encodeURIComponent(keywords)}`;
-        
-        const imageResponse = await axios.get(imageUrl, { 
-            responseType: 'arraybuffer',
-            maxRedirects: 5,
-            validateStatus: function (status) {
-                return status >= 200 && status < 500;
+        // Search Unsplash for image using the prompt
+        const searchResponse = await axios.get('https://api.unsplash.com/search/photos', {
+            params: {
+                query: imagePrompt,
+                orientation: 'landscape',
+                per_page: 1
+            },
+            headers: {
+                Authorization: `Client-ID ${UNSPLASH_ACCESS_KEY}`
             }
         });
 
-        if (imageResponse.status !== 200) {
-            console.error('Failed to fetch image:', imageResponse.status);
+        if (!searchResponse.data.results || searchResponse.data.results.length === 0) {
+            console.error('No images found on Unsplash');
             return 0;
         }
+
+        // Get the first image URL
+        const imageUrl = searchResponse.data.results[0].urls.raw + '&w=1600&h=900&fit=crop';
+        
+        // Download the image
+        const imageResponse = await axios.get(imageUrl, { 
+            responseType: 'arraybuffer'
+        });
 
         // Compress image
         const compressedImage = await compressImage(imageResponse.data);
         
-        // Check file size (100KB = 102400 bytes)
-        if (compressedImage.length > 102400) {
-            console.log('Image still too large after compression, attempting further compression');
-            const furtherCompressed = await compressImage(compressedImage);
-            if (furtherCompressed.length > 102400) {
-                console.error('Unable to compress image to target size');
-                return 0;
-            }
-            compressedImage = furtherCompressed;
-        }
-
         const formData = new FormData();
-        formData.append('file', new Blob([compressedImage]), 'featured-image.webp');
+        formData.append('file', compressedImage, {
+            filename: 'featured-image.webp',
+            contentType: 'image/webp'
+        });
 
         const mediaResponse = await axios.post(`${WP_API_URL}/wp-json/wp/v2/media`, formData, {
             headers: {
@@ -195,6 +198,24 @@ async function setFeaturedImage(imagePrompt) {
     }
 }
 
+// Helper function to generate image search keywords from title
+function generateImageKeywords(title) {
+    // List of connecting words to remove
+    const connectingWords = [
+        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with',
+        'by', 'about', 'like', 'through', 'over', 'between', 'after', 'since', 'before',
+        'is', 'are', 'was', 'were', 'be', 'been'
+    ];
+
+    // Split title into words and filter out connecting words
+    const keywords = title
+        .toLowerCase()
+        .split(' ')
+        .filter(word => !connectingWords.includes(word));
+
+    return keywords.join(' ');
+}
+
 app.post('/generate-post', upload.single('image'), async (req, res) => {
     try {
         const { topic } = req.body;
@@ -202,7 +223,7 @@ app.post('/generate-post', upload.single('image'), async (req, res) => {
         const capitalizedTopic = capitalizeTitle(topic);
 
         // Enhanced blog prompt for longer content
-        const blogPrompt = `Write a comprehensive, SEO-optimized blog post/news article about ${capitalizedTopic}. 
+        const blogPrompt = `Write a comprehensive, SEO-optimized blog post about ${capitalizedTopic}. 
             Requirements:
             1. Title: Create an engaging H1 title
             2. Meta Description: Write a compelling meta description (150-160 characters)
@@ -215,12 +236,10 @@ app.post('/generate-post', upload.single('image'), async (req, res) => {
             9. Total word count should be at least 1000 words
             10. Suggest one main category for the post
             11. Suggest 5-7 relevant tags for the post
-            12. Suggest a detailed image prompt for a featured image
             
             Format the response with:
             CATEGORY: [category]
             TAGS: [tag1, tag2, tag3, tag4, tag5]
-            IMAGE_PROMPT: [detailed image description]
             
             Then format the content in HTML using proper heading tags (h1, h2) and paragraph tags.
             Use <ul> and <li> for bullet points.
@@ -228,25 +247,20 @@ app.post('/generate-post', upload.single('image'), async (req, res) => {
 
         let blogContent = await generateWithOllama(blogPrompt);
 
-        // Update the content processing to extract metadata
+        // Extract metadata from the content
         let category = '';
         let tags = [];
-        let imagePrompt = '';
 
-        // Extract metadata from the content
         const categoryMatch = blogContent.match(/CATEGORY:\s*(.+?)\n/);
         const tagsMatch = blogContent.match(/TAGS:\s*(.+?)\n/);
-        const imageMatch = blogContent.match(/IMAGE_PROMPT:\s*(.+?)\n/);
 
         if (categoryMatch) category = categoryMatch[1].trim();
         if (tagsMatch) tags = tagsMatch[1].split(',').map(tag => tag.trim());
-        if (imageMatch) imagePrompt = imageMatch[1].trim();
 
         // Process the content
         blogContent = blogContent
             .replace(/CATEGORY:.*\n/, '')
             .replace(/TAGS:.*\n/, '')
-            .replace(/IMAGE_PROMPT:.*\n/, '')
             .replace(/\*\*/g, '')
             .replace(/Meta Description:.*?\n/g, '')
             .replace(/Keywords:.*$/s, '')
@@ -261,10 +275,10 @@ app.post('/generate-post', upload.single('image'), async (req, res) => {
             blogContent = `<p>${blogContent.trim()}</p>`;
         }
 
-        // If an image was uploaded, use it instead of fetching from Unsplash
+        // Handle featured image
         let featuredMediaId = 0;
         if (uploadedImage) {
-            // Compress and convert uploaded image
+            // Use uploaded image
             const compressedImage = await compressImage(uploadedImage.buffer);
             
             const formData = new FormData();
@@ -278,16 +292,16 @@ app.post('/generate-post', upload.single('image'), async (req, res) => {
                     ...formData.getHeaders(),
                     'Content-Type': 'multipart/form-data',
                 },
-                auth: { username: WP_USERNAME, password: WP_APP_PASSWORD },
-                maxBodyLength: Infinity,
-                maxContentLength: Infinity
+                auth: { username: WP_USERNAME, password: WP_APP_PASSWORD }
             });
             featuredMediaId = mediaResponse.data.id;
         } else {
-            featuredMediaId = await setFeaturedImage(imagePrompt || capitalizedTopic);
+            // Use the simplified keywords for Unsplash search
+            const imageKeywords = generateImageKeywords(topic); // Use original topic, not capitalized
+            featuredMediaId = await setFeaturedImage(imageKeywords);
         }
 
-        // Create the post with metadata and uploaded image
+        // Create the post
         const wpResponse = await axios.post(`${WP_API_URL}/wp-json/wp/v2/posts`, {
             title: capitalizedTopic,
             content: blogContent,
