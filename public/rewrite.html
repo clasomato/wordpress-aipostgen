@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Blog Post Re-Writer</title>
+    <style>
+        /* Copy styles from index.html and add: */
+        .nav {
+            background-color: #333;
+            padding: 1rem;
+            margin-bottom: 2rem;
+        }
+        .nav a {
+            color: white;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            margin-right: 1rem;
+        }
+        .nav a.active {
+            background-color: #555;
+            border-radius: 4px;
+        }
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+        }
+        .form-group input[type="text"] {
+            width: 100%;
+            padding: 0.5rem;
+        }
+        #content {
+            width: 100%;
+            min-height: 300px;
+            margin-bottom: 1rem;
+        }
+        .tag-input {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .tag {
+            background: #e0e0e0;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .tag button {
+            border: none;
+            background: none;
+            cursor: pointer;
+            color: red;
+            margin: 0;
+            padding: 0;
+        }
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            color: white;
+            text-align: center;
+        }
+
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .success {
+            color: green;
+            margin: 10px 0;
+            padding: 10px;
+            background: #e8f5e9;
+            border-radius: 4px;
+        }
+
+        .error {
+            color: red;
+            margin: 10px 0;
+            padding: 10px;
+            background: #ffebee;
+            border-radius: 4px;
+        }
+
+        .status-message {
+            margin-top: 10px;
+            font-size: 16px;
+        }
+
+        .category-input-container {
+            position: relative;
+        }
+
+        .autocomplete-results {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            width: 100%;
+            background: white;
+            border: 1px solid #ccc;
+            border-top: none;
+            z-index: 1000;
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .autocomplete-results li {
+            padding: 10px;
+            border-bottom: 1px solid #ccc;
+            cursor: pointer;
+        }
+
+        .autocomplete-results li:hover {
+            background-color: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+    <div class="nav">
+        <a href="/">Generate New</a>
+        <a href="/rewrite.html" class="active">Re-Write</a>
+    </div>
+
+    <h1>Blog Post Re-Writer</h1>
+    <form id="rewriteForm">
+        <div class="form-group">
+            <label for="title" class="required">Title:</label>
+            <input type="text" id="title" required>
+        </div>
+
+        <div class="form-group">
+            <label for="content" class="required">Content:</label>
+            <textarea id="content" required></textarea>
+        </div>
+
+        <div class="form-group">
+            <label for="category">Category:</label>
+            <div class="category-input-container">
+                <input type="text" id="category" autocomplete="off">
+                <div id="categoryResults" class="autocomplete-results"></div>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="newTag">Tags:</label>
+            <div class="tag-input">
+                <input type="text" id="newTag">
+                <button type="button" onclick="addTag()">Add Tag</button>
+            </div>
+            <div id="tags" class="tag-input"></div>
+        </div>
+
+        <div class="form-group">
+            <label for="image">Featured Image:</label>
+            <input type="file" id="image" accept="image/*">
+        </div>
+
+        <button type="submit">Re-Write and Publish</button>
+    </form>
+
+    <div class="loading-overlay" id="loadingOverlay">
+        <div>
+            <div class="loading-spinner"></div>
+            <div class="status-message" id="statusMessage">Processing...</div>
+        </div>
+    </div>
+
+    <div id="results"></div>
+
+    <script>
+        const tags = new Set();
+        const statusMessage = document.getElementById('statusMessage');
+        
+        function addTag() {
+            const input = document.getElementById('newTag');
+            const tag = input.value.trim();
+            if (tag) {
+                tags.add(tag);
+                input.value = '';
+                renderTags();
+            }
+        }
+
+        function removeTag(tag) {
+            tags.delete(tag);
+            renderTags();
+        }
+
+        function renderTags() {
+            const container = document.getElementById('tags');
+            container.innerHTML = '';
+            tags.forEach(tag => {
+                const div = document.createElement('div');
+                div.className = 'tag';
+                div.innerHTML = `
+                    ${tag}
+                    <button type="button" onclick="removeTag('${tag}')">&times;</button>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function updateStatus(message) {
+            statusMessage.textContent = message;
+        }
+
+        document.getElementById('rewriteForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData();
+            
+            updateStatus('Preparing form data...');
+            formData.append('title', document.getElementById('title').value);
+            formData.append('content', document.getElementById('content').value);
+            formData.append('category', document.getElementById('category').value);
+            formData.append('tags', JSON.stringify(Array.from(tags)));
+            
+            const imageFile = document.getElementById('image').files[0];
+            if (imageFile) {
+                updateStatus('Processing image...');
+                formData.append('image', imageFile);
+            }
+
+            const loadingOverlay = document.getElementById('loadingOverlay');
+            const resultsDiv = document.getElementById('results');
+            
+            try {
+                loadingOverlay.style.display = 'flex';
+                resultsDiv.innerHTML = '';
+
+                const eventSource = new EventSource('/rewrite-status');
+                eventSource.onmessage = (event) => {
+                    updateStatus(event.data);
+                };
+
+                updateStatus('Sending data to server...');
+                const response = await fetch('/rewrite-post', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                eventSource.close();
+                const data = await response.json();
+                
+                const status = document.createElement('div');
+                status.className = data.success ? 'success' : 'error';
+                status.textContent = data.success ? 
+                    `✓ Successfully re-wrote and published post` :
+                    `✗ Failed to process post: ${data.error}`;
+                resultsDiv.appendChild(status);
+            } catch (error) {
+                const status = document.createElement('div');
+                status.className = 'error';
+                status.textContent = `✗ Error processing post: ${error.message}`;
+                resultsDiv.appendChild(status);
+            } finally {
+                loadingOverlay.style.display = 'none';
+                updateStatus('Processing...');
+            }
+        });
+
+        let debounceTimer;
+        const categoryInput = document.getElementById('category');
+        const categoryResults = document.getElementById('categoryResults');
+
+        categoryInput.addEventListener('input', async function() {
+            clearTimeout(debounceTimer);
+            const searchTerm = this.value;
+            
+            if (searchTerm.length < 2) {
+                categoryResults.innerHTML = '';
+                return;
+            }
+
+            debounceTimer = setTimeout(async () => {
+                try {
+                    const response = await fetch(`/categories?search=${encodeURIComponent(searchTerm)}`);
+                    const categories = await response.json();
+                    
+                    categoryResults.innerHTML = '';
+                    if (categories.length > 0) {
+                        const ul = document.createElement('ul');
+                        categories.forEach(category => {
+                            const li = document.createElement('li');
+                            li.textContent = category.name;
+                            li.addEventListener('click', () => {
+                                categoryInput.value = category.name;
+                                categoryResults.innerHTML = '';
+                            });
+                            ul.appendChild(li);
+                        });
+                        categoryResults.appendChild(ul);
+                    }
+                } catch (error) {
+                    console.error('Error fetching categories:', error);
+                }
+            }, 300);
+        });
+
+        // Hide results when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!categoryInput.contains(e.target) && !categoryResults.contains(e.target)) {
+                categoryResults.innerHTML = '';
+            }
+        });
+    </script>
+</body>
+</html> 

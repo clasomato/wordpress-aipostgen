@@ -4,6 +4,8 @@ const axios = require('axios');
 const multer = require('multer');
 const FormData = require('form-data');
 const upload = multer();
+const { EventEmitter } = require('events');
+const statusEmitter = new EventEmitter();
 
 const app = express();
 app.use(express.json());
@@ -216,6 +218,22 @@ function generateImageKeywords(title) {
     return keywords.join(' ');
 }
 
+app.get('/rewrite-status', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    const sendStatus = (status) => {
+        res.write(`data: ${status}\n\n`);
+    };
+
+    statusEmitter.on('status', sendStatus);
+
+    req.on('close', () => {
+        statusEmitter.removeListener('status', sendStatus);
+    });
+});
+
 app.post('/generate-post', upload.single('image'), async (req, res) => {
     try {
         const { topic } = req.body;
@@ -224,26 +242,28 @@ app.post('/generate-post', upload.single('image'), async (req, res) => {
 
         // Enhanced blog prompt for longer content
         const blogPrompt = `Write a comprehensive, SEO-optimized blog post about ${capitalizedTopic}. 
-            Requirements:
-            1. Title: Create an engaging H1 title
-            2. Meta Description: Write a compelling meta description (150-160 characters)
-            3. Introduction: A strong opening paragraph that hooks the reader
-            4. Main Content: Create 5-6 detailed sections with H2 headings
-            5. Each section should be at least 150-200 words
-            6. Include relevant examples and explanations
-            7. Add bullet points or numbered lists where appropriate
-            8. Conclusion: A thorough summary paragraph
-            9. Total word count should be at least 1000 words
-            10. Suggest one main category for the post
-            11. Suggest 5-7 relevant tags for the post
-            
-            Format the response with:
-            CATEGORY: [category]
-            TAGS: [tag1, tag2, tag3, tag4, tag5]
-            
-            Then format the content in HTML using proper heading tags (h1, h2) and paragraph tags.
-            Use <ul> and <li> for bullet points.
-            Make the content engaging and informative for the reader.`;
+
+Requirements:
+1. Create an engaging title (do not use any markdown or special characters)
+2. Meta Description: Write a compelling meta description (150-160 characters)
+3. Introduction: A strong opening paragraph that hooks the reader
+4. Main Content: Create 5-6 detailed sections with H2 headings
+5. Each section should be at least 150-200 words
+6. Include relevant examples and explanations
+7. Add bullet points or numbered lists where appropriate
+8. Conclusion: A thorough summary paragraph
+9. Total word count should be at least 1000 words (do not include word count in the output)
+10. Suggest one main category for the post
+11. Suggest 5-7 relevant tags for the post
+
+Format the response with:
+CATEGORY: [category]
+TAGS: [tag1, tag2, tag3, tag4, tag5]
+
+Then format the content in clean HTML using proper heading tags (h1, h2) and paragraph tags.
+Use <ul> and <li> for bullet points.
+Do not include any metadata, word counts, or notes in the final content.
+Do not use any markdown formatting like **, ##, or other special characters.`;
 
         let blogContent = await generateWithOllama(blogPrompt);
 
@@ -259,16 +279,21 @@ app.post('/generate-post', upload.single('image'), async (req, res) => {
 
         // Process the content
         blogContent = blogContent
+            .replace(/^[`\s*#]+|[`\s*#]+$/g, '') // Remove backticks, asterisks, and hashes at start/end
+            .replace(/\*\*|__/g, '') // Remove all bold markdown
+            .replace(/#+\s/g, '') // Remove any remaining header markdown
             .replace(/CATEGORY:.*\n/, '')
             .replace(/TAGS:.*\n/, '')
-            .replace(/\*\*/g, '')
+            .replace(/TITLE:.*\n/, '')
             .replace(/Meta Description:.*?\n/g, '')
             .replace(/Keywords:.*$/s, '')
             .replace(/\n\n/g, '</p><p>')
-            .replace(/###\s(.*?)\n/g, '<h2>$1</h2>')
+            .replace(/###?\s*(.*?)\n/g, '<h2>$1</h2>')
+            .replace(/^\s*["`'*]+|["`'*]+\s*$/g, '') // Remove quotes and asterisks
             .replace(/^\s+/, '')
             .replace(/\s+$/, '')
             .replace(/>\s+</g, '><')
+            .replace(/Tags:.*$/, '')
             .trim();
 
         if (!blogContent.startsWith('<')) {
@@ -323,6 +348,145 @@ app.post('/generate-post', upload.single('image'), async (req, res) => {
             success: false, 
             error: error.message 
         });
+    }
+});
+
+app.post('/rewrite-post', upload.single('image'), async (req, res) => {
+    try {
+        statusEmitter.emit('status', 'Processing request data...');
+        const { title, content, category, tags } = req.body;
+        const uploadedImage = req.file;
+        const parsedTags = JSON.parse(tags);
+        const capitalizedTitle = capitalizeTitle(title);
+
+        // Enhanced rewrite prompt
+        const rewritePrompt = `Enhance and optimize this blog post while maintaining its core message:
+
+        Original Title: ${capitalizedTitle}
+        Content: ${content}
+        
+        Requirements:
+        1. Create a new SEO-optimized title (do not use any markdown or special characters)
+        2. Keep the main topic and key points
+        3. Enhance SEO optimization
+        4. Add any missing sections that would improve completeness
+        5. Use clean HTML formatting with h1, h2, and p tags
+        6. Add bullet points or numbered lists where appropriate
+        7. Total word count should be at least 1000 words (do not include word count in the output)
+        
+        Format the response with:
+        TITLE: [Your new optimized title - no special characters or markdown]
+        CATEGORY: ${category || '[suggest category]'}
+        TAGS: ${parsedTags.length > 0 ? parsedTags.join(', ') : '[suggest tags]'}
+        
+        [Rest of the enhanced content in clean HTML - no markdown]`;
+
+        statusEmitter.emit('status', 'Generating enhanced content with AI...');
+        let enhancedContent = await generateWithOllama(rewritePrompt);
+
+        // Extract metadata from the content
+        let finalCategory = category;
+        let finalTags = parsedTags;
+        let finalTitle = capitalizedTitle;
+
+        const titleMatch = enhancedContent.match(/TITLE:\s*(.+?)\n/);
+        const categoryMatch = enhancedContent.match(/CATEGORY:\s*(.+?)\n/);
+        const tagsMatch = enhancedContent.match(/TAGS:\s*(.+?)\n/);
+
+        if (titleMatch) finalTitle = capitalizeTitle(titleMatch[1].trim());
+        if (!category && categoryMatch) finalCategory = categoryMatch[1].trim();
+        if (parsedTags.length === 0 && tagsMatch) {
+            finalTags = tagsMatch[1].split(',').map(tag => tag.trim());
+        }
+
+        // Process the content
+        enhancedContent = enhancedContent
+            .replace(/^[`\s*#]+|[`\s*#]+$/g, '') // Remove backticks, asterisks, and hashes at start/end
+            .replace(/\*\*|__/g, '') // Remove all bold markdown
+            .replace(/#+\s/g, '') // Remove any remaining header markdown
+            .replace(/CATEGORY:.*\n/, '')
+            .replace(/TAGS:.*\n/, '')
+            .replace(/TITLE:.*\n/, '')
+            .replace(/Meta Description:.*?\n/g, '')
+            .replace(/Keywords:.*$/s, '')
+            .replace(/\n\n/g, '</p><p>')
+            .replace(/###?\s*(.*?)\n/g, '<h2>$1</h2>')
+            .replace(/^\s*["`'*]+|["`'*]+\s*$/g, '') // Remove quotes and asterisks
+            .replace(/^\s+/, '')
+            .replace(/\s+$/, '')
+            .replace(/>\s+</g, '><')
+            .replace(/Tags:.*$/, '')
+            .trim();
+
+        if (!enhancedContent.startsWith('<')) {
+            enhancedContent = `<p>${enhancedContent.trim()}</p>`;
+        }
+
+        // Handle featured image
+        let featuredMediaId = 0;
+        if (uploadedImage) {
+            statusEmitter.emit('status', 'Processing uploaded image...');
+            const compressedImage = await compressImage(uploadedImage.buffer);
+            
+            const formData = new FormData();
+            formData.append('file', compressedImage, {
+                filename: 'featured-image.webp',
+                contentType: 'image/webp'
+            });
+
+            const mediaResponse = await axios.post(`${WP_API_URL}/wp-json/wp/v2/media`, formData, {
+                headers: {
+                    ...formData.getHeaders(),
+                    'Content-Type': 'multipart/form-data',
+                },
+                auth: { username: WP_USERNAME, password: WP_APP_PASSWORD }
+            });
+            featuredMediaId = mediaResponse.data.id;
+        } else {
+            statusEmitter.emit('status', 'Fetching image from Unsplash...');
+            const imageKeywords = generateImageKeywords(title);
+            featuredMediaId = await setFeaturedImage(imageKeywords);
+        }
+
+        // Create WordPress post
+        statusEmitter.emit('status', 'Creating WordPress post...');
+        const wpResponse = await axios.post(`${WP_API_URL}/wp-json/wp/v2/posts`, {
+            title: finalTitle,
+            content: enhancedContent,
+            status: 'publish',
+            categories: [await getOrCreateCategory(finalCategory)],
+            tags: await getOrCreateTags(finalTags),
+            featured_media: featuredMediaId
+        }, {
+            auth: {
+                username: WP_USERNAME,
+                password: WP_APP_PASSWORD
+            }
+        });
+
+        statusEmitter.emit('status', 'Post published successfully!');
+        res.json({ success: true, post: wpResponse.data });
+    } catch (error) {
+        statusEmitter.emit('status', `Error: ${error.message}`);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+});
+
+app.get('/categories', async (req, res) => {
+    try {
+        const response = await axios.get(`${WP_API_URL}/wp-json/wp/v2/categories`, {
+            params: { 
+                per_page: 100,
+                search: req.query.search || ''
+            },
+            auth: { username: WP_USERNAME, password: WP_APP_PASSWORD }
+        });
+        res.json(response.data);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
 });
 

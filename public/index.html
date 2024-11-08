@@ -76,9 +76,28 @@
         .success {
             color: #00C851;
         }
+        .nav {
+            background-color: #333;
+            padding: 1rem;
+            margin-bottom: 2rem;
+        }
+        .nav a {
+            color: white;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            margin-right: 1rem;
+        }
+        .nav a.active {
+            background-color: #555;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
+    <div class="nav">
+        <a href="/" class="active">Generate New</a>
+        <a href="/rewrite.html">Re-Write</a>
+    </div>
     <h1>Blog Post Generator</h1>
     <form id="topicForm">
         <div class="topics-container">
