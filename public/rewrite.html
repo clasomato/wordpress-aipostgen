@@ -134,6 +134,14 @@
         .autocomplete-results li:hover {
             background-color: #f0f0f0;
         }
+
+        .form-group select {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background-color: white;
+        }
     </style>
 </head>
 <body>
@@ -174,6 +182,14 @@
         <div class="form-group">
             <label for="image">Featured Image:</label>
             <input type="file" id="image" accept="image/*">
+        </div>
+
+        <div class="form-group">
+            <label for="model">AI Model:</label>
+            <select id="model" required>
+                <option value="mistral" selected>Mistral</option>
+                <option value="llama3.2">Llama3.2</option>
+            </select>
         </div>
 
         <button type="submit">Re-Write and Publish</button>
@@ -231,6 +247,7 @@
             
             updateStatus('Preparing form data...');
             formData.append('title', document.getElementById('title').value);
+            formData.append('model', document.getElementById('model').value);
             formData.append('content', document.getElementById('content').value);
             formData.append('category', document.getElementById('category').value);
             formData.append('tags', JSON.stringify(Array.from(tags)));

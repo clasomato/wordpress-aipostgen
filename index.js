@@ -21,10 +21,13 @@ const WP_APP_PASSWORD = process.env.WP_APP_PASSWORD;
 const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY;
 
 // Function to generate content using Ollama
-async function generateWithOllama(prompt) {
+async function generateWithOllama(prompt, model = 'mistral') {
     try {
+        // Ensure correct model name for llama3.2
+        const modelName = model === 'llama3.2' ? 'llama3.2' : 'mistral';
+        
         const response = await axios.post('http://localhost:11434/api/generate', {
-            model: 'mistral',
+            model: modelName,
             prompt: prompt,
             stream: false
         });
@@ -354,7 +357,7 @@ Do not use any markdown formatting like **, ##, or other special characters.`;
 app.post('/rewrite-post', upload.single('image'), async (req, res) => {
     try {
         statusEmitter.emit('status', 'Processing request data...');
-        const { title, content, category, tags } = req.body;
+        const { title, content, category, tags, model } = req.body;
         const uploadedImage = req.file;
         const parsedTags = JSON.parse(tags);
         const capitalizedTitle = capitalizeTitle(title);
@@ -382,7 +385,7 @@ app.post('/rewrite-post', upload.single('image'), async (req, res) => {
         [Rest of the enhanced content in clean HTML - no markdown]`;
 
         statusEmitter.emit('status', 'Generating enhanced content with AI...');
-        let enhancedContent = await generateWithOllama(rewritePrompt);
+        let enhancedContent = await generateWithOllama(rewritePrompt, model || 'mistral');
 
         // Extract metadata from the content
         let finalCategory = category;
